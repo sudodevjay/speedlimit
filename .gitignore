@@ -16,6 +16,3 @@ SpeedLimitDisplay_BLE/mobile-app/
 local.properties
 *.log
 
-# Secrets (copy the *.example files)
-secrets.h
-SpeedLimitDisplay_BLE/SpeedDisplayApp/src/secrets.js
