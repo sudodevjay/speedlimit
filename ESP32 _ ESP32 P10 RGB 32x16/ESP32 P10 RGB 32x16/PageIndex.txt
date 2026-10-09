@@ -1,0 +1,286 @@
+const char MAIN_page[] PROGMEM = R"=====(
+  <!DOCTYPE html>
+  <html>
+    <title>Arduino_IDE-ESP32-P10_RGB_32x16_HUB75_Scan_1/8-PxMatrix-Web_Server</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      html {font-family: Helvetica, sans-serif;}
+      h1 {font-size: 1.5rem; color:#1976D2;}
+  
+      label {font-size: 14px;}
+  
+      .div_Form {
+        margin: auto;
+        width: 90%;
+        border:1px solid #D8D8D8;
+        border-radius: 10px;
+        background-color: #f2f2f2;
+        padding: 9px 9px;
+      }
+  
+      .myButton {
+        display: inline-block;
+        padding: 5px 25px;
+        font-size: 13px;
+        cursor: pointer;
+        text-align: center;
+        text-decoration: none;
+        outline: none;
+        color: #fff;
+        background-color: #1976D2;
+        border: none;
+        border-radius: 8px;
+        box-shadow: 0 3px #999;
+      }
+      .myButton:hover {background-color: #104d89}
+      .myButton:active {background-color: #104d89; box-shadow: 0 1px #666; transform: translateY(2px);}
+      .myButton:disabled {background-color: #666; box-shadow: 0 1px #666; transform: translateY(2px);}
+      
+      .div_Form_Input {display: table; margin: 0px; padding: 0px; box-sizing: border-box;}
+      .div_Input_Text {display: table-cell; width: 100%;}
+      .div_Input_Text > input {width:99.5%; margin-left: 0px; padding-left: 2px; box-sizing: border-box;}
+      
+      table, th, td {
+        border:0px solid black;
+        font-size: 14px;
+      }
+      tr {height: 30px;}
+    </style>
+    
+    <body>
+      <div style="text-align: center;">
+        <h1>Scrolling Text with ESP32 and P10 RGB 32x16</h1>
+      </div>
+  
+      <div class="div_Form">
+        <form>
+          <label for="Keys_TXT">Key :</label>
+          <input type="password" style="width: 170px;" id="input_Keys_TXT" name="input_Keys_TXT" maxlength="20" placeholder="Enter key here..." />
+          
+          <br>
+          
+          <hr style="border: 1px solid #e6e6e6;">
+          
+          <table style="width:230px; margin-left: -3px;">
+            <tr>
+              <td>Brightness</td>
+              <td>:</td>
+              <td>
+                <input type="text" value="50" id="input_Brightness" maxlength="3" size="3" oninput="this.value = this.value.replace(/[^0-9.]/g, '').replace(/(\..*?)\..*/g, '$1');" /> (0 - 255)
+              </td>
+            </tr>
+            <tr>
+              <td>Text Color</td>
+              <td>:</td>
+              <td>
+                <input type="color" id="input_Color" name="input_Color" value="#0000ff">
+              </td>
+            </tr>
+            <tr>
+              <td>Text Size</td>
+              <td>:</td>
+              <td>
+                <select name="input_Text_Size" id="input_Text_Size">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td>Y Position</td>
+              <td>:</td>
+              <td>
+                <select name="input_Y_Position" id="input_Y_Position">
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td>Scrolling Speed</td>
+              <td>:</td>
+              <td>
+                <select name="input_Scrolling_Speed" id="input_Scrolling_Speed">
+                  <option value="20">20</option>
+                  <option value="25">25</option>
+                  <option value="30">30</option>
+                  <option value="35">35</option>
+                  <option value="40">40</option>
+                  <option value="45">45</option>
+                  <option value="50">50</option>
+                  <option value="55">55</option>
+                  <option value="60">60</option>
+                  <option value="65">65</option>
+                  <option value="70">70</option>
+                  <option value="75">75</option>
+                </select>     
+              </td>
+            </tr>
+          </table>
+          
+          <hr style="border: 1px solid #e6e6e6;">
+          
+          <label for="Keys_TXT">Scrolling Text :</label>
+          <br>
+          <div class="div_Form_Input" style="width: 100%; margin-top: 5px;">
+            <div class="div_Input_Text">
+              <input type="text" id="input_Scrolling_Text" name="input_Scrolling_Text" maxlength="150" placeholder="Enter text here...(Max 150 characters)" />
+            </div>
+            <button type="button" onclick="clear_Scrolling_Text()">X</button>
+          </div>
+          
+          <hr style="border: 1px solid #e6e6e6;">
+          
+          <button type="button" class="myButton" id="btn_Submit" onclick="btn_Submit_Click()">Submit</button>
+          <button type="button" class="myButton" id="btn_Get_Settings" onclick="btn_Get_Settings_Click()">Get Settings</button>
+        </form>
+      </div>
+  
+      <script>
+        //________________________________________________________________________________ function btn_Submit_Click()
+        // Function to send settings to the server.
+        function btn_Submit_Click() {
+          var key_TXT = document.getElementById("input_Keys_TXT").value;
+  
+          if (key_TXT == "") {
+            alert("Error ! \rThe key cannot be empty.");
+            return;
+          }
+          
+          var scroll_Text_Brightness = document.getElementById("input_Brightness").value;
+          
+          if (scroll_Text_Brightness == "") {
+            alert("Error ! \rBrightness cannot be empty.");
+            return;
+          }
+          
+          var scroll_Text_Color = hexToRgb(document.getElementById("input_Color").value);
+          var scroll_Text_Color_R = scroll_Text_Color[0];
+          var scroll_Text_Color_G = scroll_Text_Color[1];
+          var scroll_Text_Color_B = scroll_Text_Color[2];
+          
+          var scroll_Text_Size = document.getElementById("input_Text_Size").value;      
+          var scroll_Text_Y_Position = document.getElementById("input_Y_Position").value;
+          var scroll_Text_Speed = document.getElementById("input_Scrolling_Speed").value;
+          var scroll_Text_Text = document.getElementById("input_Scrolling_Text").value;
+  
+          var msg;
+          msg = "key=" + key_TXT;
+          msg += "&sta=set";
+          msg += "&st_Brightness=" + scroll_Text_Brightness;
+          msg += "&st_Color_R=" + scroll_Text_Color_R + "&st_Color_G=" + scroll_Text_Color_G + "&st_Color_B=" + scroll_Text_Color_B;
+          msg += "&st_Size=" + scroll_Text_Size;
+          msg += "&st_Y_Position=" + scroll_Text_Y_Position;
+          msg += "&st_Speed=" + scroll_Text_Speed;
+          msg += "&st_Text=" + scroll_Text_Text;
+          
+          Send("set", msg);
+        }
+        //________________________________________________________________________________
+  
+        //________________________________________________________________________________ function btn_Get_Settings_Click()
+        // Function to get saved settings from the server.
+        function btn_Get_Settings_Click() {
+          var key_TXT = document.getElementById("input_Keys_TXT").value;
+  
+          if (key_TXT == "") {
+            alert("Error ! \rThe key cannot be empty.");
+            return;
+          }
+          
+          var msg;
+          msg = "key=" + key_TXT;
+          msg += "&sta=get";
+          
+          Send("get", msg);
+        }
+        //________________________________________________________________________________
+        
+        //________________________________________________________________________________ clear_Scrolling_Text()
+        function clear_Scrolling_Text() {
+          document.getElementById("input_Scrolling_Text").value = "";
+        }
+        //________________________________________________________________________________
+        
+        //________________________________________________________________________________ function hexToRgb(hex)
+        function hexToRgb(hex) {
+          const normal = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+          if (normal) return normal.slice(1).map(e => parseInt(e, 16));
+  
+          const shorthand = hex.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+          if (shorthand) return shorthand.slice(1).map(e => 0x11 * parseInt(e, 16));
+  
+          return null;
+        }
+        //________________________________________________________________________________
+        
+        //________________________________________________________________________________ rgbToHex(red, green, blue)
+        function rgbToHex(red, green, blue) {
+          const rgb = (red << 16) | (green << 8) | (blue << 0);
+          return '#' + (0x1000000 + rgb).toString(16).slice(1);
+        }
+        //________________________________________________________________________________
+  
+        //________________________________________________________________________________ function apply_the_Received_Settings(texts)
+        // Function to apply settings received from the server.
+        function apply_the_Received_Settings(texts) {
+          const myArray_Getting_Settings = texts.split("|");
+          
+          var scroll_Text_Brightness = myArray_Getting_Settings[0];
+          
+          var scroll_Text_Color_R = myArray_Getting_Settings[1];
+          var scroll_Text_Color_G = myArray_Getting_Settings[2];
+          var scroll_Text_Color_B = myArray_Getting_Settings[3];
+          var scroll_Text_Color = rgbToHex(scroll_Text_Color_R, scroll_Text_Color_G, scroll_Text_Color_B);
+          
+          var scroll_Text_Size = myArray_Getting_Settings[4];   
+          var scroll_Text_Y_Position = myArray_Getting_Settings[5];
+          var scroll_Text_Speed = myArray_Getting_Settings[6];
+          var scroll_Text_Text = myArray_Getting_Settings[7];
+          
+          document.getElementById("input_Brightness").value = scroll_Text_Brightness;
+          document.getElementById("input_Color").value = scroll_Text_Color;
+          document.getElementById("input_Text_Size").value = scroll_Text_Size;
+          document.getElementById("input_Y_Position").value = scroll_Text_Y_Position;
+          document.getElementById("input_Scrolling_Speed").value = scroll_Text_Speed;
+          document.getElementById("input_Scrolling_Text").value = scroll_Text_Text;
+        }
+        //________________________________________________________________________________
+  
+        //________________________________________________________________________________ function Send(sta, msg)
+        function Send(sta, msg) {
+          if (window.XMLHttpRequest) {
+            // code for IE7+, Firefox, Chrome, Opera, Safari
+            xmlhttp = new XMLHttpRequest();
+          } else {
+            // code for IE6, IE5
+            xmlhttp = new ActiveXObject("Microsoft.XMLHTTP");
+          }
+          xmlhttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+              if (this.responseText == "+ERR") {
+                alert("Error !\rWrong Key !\rPlease enter the correct key.");
+                return;
+              }
+              
+              if (sta == "get") {
+                apply_the_Received_Settings(this.responseText);
+              }
+            }
+          }
+          xmlhttp.open("GET", "settings?" + msg, true);
+          xmlhttp.send();
+        }
+        //________________________________________________________________________________
+      </script>
+    </body>
+  </html>
+)=====";

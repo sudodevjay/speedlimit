@@ -1,0 +1,21 @@
+# Dependencies / build output (recreate with `npm install` and gradlew)
+node_modules/
+build/
+.gradle/
+.cxx/
+*.apk
+*.aab
+
+# Obsolete Expo version of the app (replaced by SpeedLimitDisplay_BLE/SpeedDisplayApp, React Native CLI)
+SpeedLimitDisplay_BLE/mobile-app/
+
+# Local tool / IDE state
+.claude/
+.vscode/
+.idea/
+local.properties
+*.log
+
+# Secrets (copy the *.example files)
+secrets.h
+SpeedLimitDisplay_BLE/SpeedDisplayApp/src/secrets.js

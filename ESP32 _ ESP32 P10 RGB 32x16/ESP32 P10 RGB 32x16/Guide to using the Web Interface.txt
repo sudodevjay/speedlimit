@@ -1,0 +1,8 @@
+1. Make sure the "key" you enter in the "key" text box is the same "key" as the one in the Arduino code.
+2. Before you do the settings, you must get the settings stored on the ESP32 by pressing the "Get Settings" button.
+4. Text Settings for Scrolling Text :
+   > Brightness : for Text Brightness.
+   > Text Color : for Text color.
+   > Y Position : for the Y axis position of the text (vertical).
+   > Scrolling Speed : for scrolling text speed (the smaller the faster).
+5. Click the "Submit" button to submit/apply the settings.

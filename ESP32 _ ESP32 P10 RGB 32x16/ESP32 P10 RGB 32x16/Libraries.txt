@@ -1,0 +1,4 @@
+- Adafruit GFX Library by Adafruit (V1.11.9) : Install via "Manage Libraries" or "Library Manager" in the Arduino IDE with the search keyword "Adafruit GFX Library".
+  (You will also need to install the latest Adafruit BusIO library. So, if when you install the "Adafruit GFX Library", a notification appears to also install the "Adafruit BusIO" library, then allow it to install the "Adafruit BusIO" library.)
+
+- PxMatrix Library by 2dom (Dominic Buchstaller) (V1.8.2) : https://github.com/2dom/PxMatrix/tree/master

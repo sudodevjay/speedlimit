@@ -1,0 +1,1229 @@
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+// Information about the P10 RGB Panel that I use :
+// - P10 RGB 32x16 HUB75 Scan 1/8 Full Color SMD.
+// - Information written on the P10 RGB board : P10-2727-8S-32X16-A
+// - IC or Chip on the P10 RGB board :
+//   > RUC7258D
+//   > DP5125D
+//   > 74HC245KA
+// - HUB75 (Scan 1/8) : 
+//    -----------
+//   | DR1 | DG1 |
+//   | DB1 | GND |
+//   | DR2 | DG2 |
+//   | DB2 | GND |
+//   |  A  |  B  |
+//   |  C  | GND |
+//   | CLK | STB |
+//   | OE  | GND |
+//    -----------
+// 
+// Software :
+// - Arduino IDE 1.8.19
+// 
+// Arduino core for the ESP32 :
+// - Arduino core for the ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6 and ESP32-H2 (V2.0.16).
+// 
+// Arduino Libraries :
+// - Adafruit GFX Library by Adafruit (V1.11.9).
+// - Adafruit BusIO by Adafruit (V1.16.1).
+// - PxMatrix Library by 2dom (Dominic Buchstaller) (V1.8.2).
+// 
+// Hardware :
+// - ESP32 DEVKIT V1.
+// - P10 RGB 32x16.
+// - 5V Power Supply.
+// - For more details, see the installation picture.
+// 
+// Troubleshooting : https://github.com/2dom/PxMatrix/tree/master?tab=readme-ov-file#troubleshooting
+//
+// If you want to install two panels or more, please look at the installation image file "Installation of Two Panels or more.png".
+// Installation reference for two panels or more :
+// - https://github.com/2dom/PxMatrix/issues/166#issuecomment-605759662
+// - https://github.com/2dom/PxMatrix/issues/200#issuecomment-642714636
+// 
+// Guide to Arduino code if using two panels or more:
+// - https://github.com/2dom/PxMatrix?tab=readme-ov-file#chaining
+// 
+// Advantages and disadvantages of the PxMatrix library (in my personal opinion):
+// - Advantages :
+//   > Uses fewer PINs than other libraries.
+//   > Compatible with ESP8266, ESP32 and ATMEL.
+//   > Easy to use.
+// - Disadvantages:
+//   > Not the best solution for driving larger displays. Source: https://github.com/2dom/PxMatrix/issues/325#issuecomment-1604367830
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+
+
+
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 01_Test_P10_RGB_32x16
+// This is how many color levels the display shows - the more the slower the update.
+//#define PxMATRIX_COLOR_DEPTH 4
+
+// Defines the speed of the SPI bus (reducing this may help if you experience noisy images).
+// The original value of PxMATRIX_SPI_FREQUENCY in the PxMatrix library example is 20000000.
+// I changed the value to 10000000 because if I use the value 20000000, then "ghosting" or "noise" appears on my P10 32x16 RGB panel.
+// Each panel may be a different case. If "ghosting" or "noise" appears on your P10 RGB panel, try changing the PxMATRIX_SPI_FREQUENCY value.
+// You can use the values ​​20000000, 15000000, 10000000 and 8000000. Or you can also try using other values.
+#define PxMATRIX_SPI_FREQUENCY 10000000
+
+// Creates a second buffer for backround drawing (doubles the required RAM).
+//#define PxMATRIX_double_buffer true
+
+//----------------------------------------Including Libraries.
+#include <PxMatrix.h>
+//----------------------------------------
+
+//----------------------------------------Pins for LED MATRIX.
+#define P_LAT 5
+#define P_A   19
+#define P_B   23
+#define P_C   18
+#define P_OE  4
+//----------------------------------------
+
+// Defines the width and height of the panel in pixels.
+#define matrix_width  32
+#define matrix_height 16
+
+// Timer setup.
+// Create a hardware timer  of ESP32.
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// This defines the 'on' time of the display is us.
+// The larger this number, the brighter the display. If too large the ESP will crash.
+uint8_t display_draw_time = 30; // 30-70 is usually fine.
+
+// Declaring the "PxMATRIX" object as a "display" and its settings.
+PxMATRIX display(matrix_width, matrix_height, P_LAT, P_OE, P_A, P_B, P_C);
+
+//----------------------------------------Some standard colors.
+// display.color565(R value = 0-255, G value = 0-255, B value = 0-255);
+uint16_t myRED      = display.color565(255, 0, 0);
+uint16_t myGREEN    = display.color565(0, 255, 0);
+uint16_t myBLUE     = display.color565(0, 0, 255);
+uint16_t myWHITE    = display.color565(255, 255, 255);
+uint16_t myYELLOW   = display.color565(255, 255, 0);
+uint16_t myCYAN     = display.color565(0, 255, 255);
+uint16_t myMAGENTA  = display.color565(255, 0, 255);
+uint16_t myVIOLET   = display.color565(127, 0, 255);
+uint16_t myBLACK    = display.color565(0, 0, 0);
+
+uint16_t myCOLOR_ARRAY[8] = {myRED, myGREEN, myBLUE, myWHITE, myYELLOW, myCYAN, myMAGENTA, myVIOLET};
+//----------------------------------------
+
+//________________________________________________________________________________ IRAM_ATTR display_updater()
+// Interrupt handler for Timer.
+void IRAM_ATTR display_updater(){
+  // Increment the counter and set the time of ISR.
+  portENTER_CRITICAL_ISR(&timerMux);
+  display.display(display_draw_time);
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ display_update_enable()
+// Subroutine to enable and disable interrupt timers.
+void display_update_enable(bool is_enable) {
+  if (is_enable){
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &display_updater, true);
+    timerAlarmWrite(timer, 1500, true);
+    timerAlarmEnable(timer);
+  }
+  else{
+    timerDetachInterrupt(timer);
+    timerAlarmDisable(timer);
+  }
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID SETUP()
+void setup() {
+  // put your setup code here, to run once:
+
+  delay(2000);
+  Serial.begin(115200);
+  Serial.println();
+
+  // Display initialization.
+  display.begin(8); //--> Value 8 for 1/8 row scan panel.
+  delay(100);
+
+  // Enable Timer Interrupts.
+  display_update_enable(true);
+  delay(100);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setBrightness(125); //--> Range from 0 to 255.
+  delay(100);
+
+  display.fillScreen(myRED);
+  delay(2000);
+  display.fillScreen(myGREEN);
+  delay(2000);
+  display.fillScreen(myBLUE);
+  delay(2000);
+  display.fillScreen(myWHITE);
+  delay(2000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setTextWrap(false);
+  display.setTextSize(1);
+  display.setRotation(0);
+  delay(100);
+
+  display.fillScreen(display.color565(255, 0, 0));
+  display.setTextColor(display.color565(255, 255, 255));
+  display.setCursor(0, 0);
+  display.print("UTEH");
+  display.setTextColor(display.color565(255, 255, 255));
+  display.setCursor(15, 9);
+  display.print("STR");
+  delay(5000);
+
+  display.clearDisplay();
+  delay(1000);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID LOOP()
+void loop() {
+  // put your main code here, to run repeatedly:
+
+  int myCOLOR_ARRAY_Length = sizeof(myCOLOR_ARRAY) / sizeof(myCOLOR_ARRAY[0]);
+  
+  for (byte i = 0; i < myCOLOR_ARRAY_Length; i++) {
+    display.setTextColor(myCOLOR_ARRAY[i]);
+    display.setCursor(0, 0);
+    display.print("1234");
+    display.setCursor(0, 9);
+    display.print("ABCD");
+    delay(2500);
+
+    display.clearDisplay();
+    delay(1000);
+
+    display.setTextColor(myCOLOR_ARRAY[i]);
+    display.setCursor(4, 0);
+    display.print("1234");
+    display.setCursor(4, 9);
+    display.print("ABCD");
+    delay(2500);
+
+    display.clearDisplay();
+    delay(1000);
+
+    display.setCursor(9, 0);
+    display.print("1234");
+    display.setCursor(9, 9);
+    display.print("ABCD");
+    delay(2500);
+  
+    display.clearDisplay();
+    delay(1000);
+  }
+}
+//________________________________________________________________________________ 
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+
+
+
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 02_P10_RGB_32x16_Adafruit_GFX_SetFont
+// This is how many color levels the display shows - the more the slower the update.
+//#define PxMATRIX_COLOR_DEPTH 4
+
+// Defines the speed of the SPI bus (reducing this may help if you experience noisy images).
+#define PxMATRIX_SPI_FREQUENCY 10000000
+
+// Creates a second buffer for backround drawing (doubles the required RAM).
+//#define PxMATRIX_double_buffer true
+
+//----------------------------------------Including Libraries.
+#include <PxMatrix.h>
+
+// Includes fonts from the "Adafruit GFX Library".
+#include <Fonts/FreeMonoBold9pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/FreeSerifBold9pt7b.h>
+//----------------------------------------
+
+//----------------------------------------Pins for LED MATRIX.
+#define P_LAT 5
+#define P_A   19
+#define P_B   23
+#define P_C   18
+#define P_OE  4
+//----------------------------------------
+
+// Defines the width and height of the panel in pixels.
+#define matrix_width  32
+#define matrix_height 16
+
+// Timer setup.
+// Create a hardware timer  of ESP32.
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// This defines the 'on' time of the display is us.
+// The larger this number, the brighter the display. If too large the ESP will crash.
+uint8_t display_draw_time = 30; // 30-70 is usually fine.
+
+// Declaring the "PxMATRIX" object as a "display" and its settings.
+PxMATRIX display(matrix_width, matrix_height, P_LAT, P_OE, P_A, P_B, P_C);
+
+//----------------------------------------Some standard colors.
+uint16_t myRED      = display.color565(255, 0, 0);
+uint16_t myGREEN    = display.color565(0, 255, 0);
+uint16_t myBLUE     = display.color565(0, 0, 255);
+uint16_t myWHITE    = display.color565(255, 255, 255);
+uint16_t myYELLOW   = display.color565(255, 255, 0);
+uint16_t myCYAN     = display.color565(0, 255, 255);
+uint16_t myMAGENTA  = display.color565(255, 0, 255);
+uint16_t myVIOLET   = display.color565(127, 0, 255);
+uint16_t myBLACK    = display.color565(0, 0, 0);
+
+uint16_t myCOLOR_ARRAY[8] = {myRED, myGREEN, myBLUE, myWHITE, myYELLOW, myCYAN, myMAGENTA, myVIOLET};
+//----------------------------------------
+
+//________________________________________________________________________________ IRAM_ATTR display_updater()
+// Interrupt handler for Timer.
+void IRAM_ATTR display_updater(){
+  // Increment the counter and set the time of ISR.
+  portENTER_CRITICAL_ISR(&timerMux);
+  display.display(display_draw_time);
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ display_update_enable()
+// Subroutine to enable and disable interrupt timers.
+void display_update_enable(bool is_enable) {
+  if (is_enable){
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &display_updater, true);
+    timerAlarmWrite(timer, 1500, true);
+    timerAlarmEnable(timer);
+  }
+  else{
+    timerDetachInterrupt(timer);
+    timerAlarmDisable(timer);
+  }
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID SETUP()
+void setup() {
+  // put your setup code here, to run once:
+
+  delay(2000);
+  Serial.begin(115200);
+  Serial.println();
+
+  // Display initialization.
+  display.begin(8); //--> Value 8 for 1/8 row scan panel.
+  delay(100);
+
+  // Enable Timer Interrupts.
+  display_update_enable(true);
+  delay(100);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setBrightness(125); //--> Range from 0 to 255.
+  delay(100);
+
+  display.fillScreen(myRED);
+  delay(2000);
+  display.fillScreen(myGREEN);
+  delay(2000);
+  display.fillScreen(myBLUE);
+  delay(2000);
+  display.fillScreen(myWHITE);
+  delay(2000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setTextWrap(false);
+  display.setRotation(0);
+  delay(100);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID LOOP()
+void loop() {
+  // put your main code here, to run repeatedly:
+
+  Serial.println();
+  Serial.println("Font : FreeMonoBold9pt7b");
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setTextColor(myRED);
+  display.setCursor(0, 12);
+  display.print("A1");
+  delay(5000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  Serial.println();
+  Serial.println("Font : FreeSansBold9pt7b");
+  display.setFont(&FreeSansBold9pt7b);
+  display.setTextColor(myGREEN);
+  display.setCursor(0, 13);
+  display.print("A1");
+  delay(5000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  Serial.println();
+  Serial.println("Font : FreeSerifBold9pt7b");
+  display.setFont(&FreeSerifBold9pt7b);
+  display.setTextColor(myBLUE);
+  display.setCursor(0, 12);
+  display.print("A1");
+  delay(5000);
+
+  display.clearDisplay();
+  delay(1000);
+}
+//________________________________________________________________________________ 
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+
+
+
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 03_P10_RGB_32x16_Scroll_Text
+// This is how many color levels the display shows - the more the slower the update.
+//#define PxMATRIX_COLOR_DEPTH 4
+
+// Defines the speed of the SPI bus (reducing this may help if you experience noisy images).
+#define PxMATRIX_SPI_FREQUENCY 10000000
+
+// Creates a second buffer for backround drawing (doubles the required RAM).
+//#define PxMATRIX_double_buffer true
+
+//----------------------------------------Including Libraries.
+#include <PxMatrix.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+//----------------------------------------
+
+//----------------------------------------Pins for LED MATRIX.
+#define P_LAT 5
+#define P_A   19
+#define P_B   23
+#define P_C   18
+#define P_OE  4
+//----------------------------------------
+
+// Defines the width and height of the panel in pixels.
+#define matrix_width  32
+#define matrix_height 16
+
+// Timer setup.
+// Create a hardware timer  of ESP32.
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// This defines the 'on' time of the display is us.
+// The larger this number, the brighter the display. If too large the ESP will crash.
+uint8_t display_draw_time = 30; // 30-70 is usually fine.
+
+// Declaring the "PxMATRIX" object as a "display" and its settings.
+PxMATRIX display(matrix_width, matrix_height, P_LAT, P_OE, P_A, P_B, P_C);
+
+//----------------------------------------Some standard colors.
+uint16_t myRED      = display.color565(255, 0, 0);
+uint16_t myGREEN    = display.color565(0, 255, 0);
+uint16_t myBLUE     = display.color565(0, 0, 255);
+uint16_t myWHITE    = display.color565(255, 255, 255);
+uint16_t myYELLOW   = display.color565(255, 255, 0);
+uint16_t myCYAN     = display.color565(0, 255, 255);
+uint16_t myMAGENTA  = display.color565(255, 0, 255);
+uint16_t myVIOLET   = display.color565(127, 0, 255);
+uint16_t myBLACK    = display.color565(0, 0, 0);
+//----------------------------------------
+
+//________________________________________________________________________________ IRAM_ATTR display_updater()
+// Interrupt handler for Timer.
+void IRAM_ATTR display_updater(){
+  // Increment the counter and set the time of ISR.
+  portENTER_CRITICAL_ISR(&timerMux);
+  display.display(display_draw_time);
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ display_update_enable()
+// Subroutine to enable and disable interrupt timers.
+void display_update_enable(bool is_enable) {
+  if (is_enable){
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &display_updater, true);
+    timerAlarmWrite(timer, 1500, true);
+    timerAlarmEnable(timer);
+  }
+  else{
+    timerDetachInterrupt(timer);
+    timerAlarmDisable(timer);
+  }
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ run_Scrolling_Text()
+// Subroutine for scrolling text.
+void run_Scrolling_Text(uint8_t scrolling_Y_Pos, unsigned long scrolling_Speed, char * scrolling_Text, uint16_t scrolling_Text_Color) {
+  uint16_t text_Length_In_Pixel;
+  int scrolling_X_Pos_CT;
+
+  if (strlen(scrolling_Text) > 0) {
+    text_Length_In_Pixel = getTextWidth(scrolling_Text);
+  } else {
+    return;
+  }
+
+  for (int scrolling_X_Pos = matrix_width; scrolling_X_Pos > -(matrix_width + text_Length_In_Pixel); scrolling_X_Pos--) {
+    scrolling_X_Pos_CT = scrolling_X_Pos + 1;
+
+    display.setTextColor(myBLACK);
+    display.setCursor(scrolling_X_Pos_CT, scrolling_Y_Pos);
+    display.print(scrolling_Text);
+    
+    display.setTextColor(scrolling_Text_Color);
+    display.setCursor(scrolling_X_Pos, scrolling_Y_Pos);
+    display.print(scrolling_Text);
+
+    delay(scrolling_Speed);
+  }
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ getTextWidth()
+uint16_t getTextWidth(const char* text) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  return w;
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID SETUP()
+void setup() {
+  // put your setup code here, to run once:
+
+  delay(2000);
+  Serial.begin(115200);
+  Serial.println();
+
+  // Display initialization.
+  display.begin(8); //--> Value 8 for 1/8 row scan panel.
+  delay(100);
+
+  // Enable Timer Interrupts.
+  display_update_enable(true);
+  delay(100);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setBrightness(125); //--> Range from 0 to 255.
+  delay(100);
+
+  display.fillScreen(myRED);
+  delay(2000);
+  display.fillScreen(myGREEN);
+  delay(2000);
+  display.fillScreen(myBLUE);
+  delay(2000);
+  display.fillScreen(myWHITE);
+  delay(2000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setTextWrap(false);
+  display.setTextSize(1);
+  display.setRotation(0);
+  delay(1000);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID LOOP()
+void loop() {
+  // put your main code here, to run repeatedly:
+  
+  display.setTextSize(1);
+  // run_Scrolling_Text(uint8_t scrolling_Y_Pos, unsigned long scrolling_Speed, char * scrolling_Text, uint16_t scrolling_Text_Color);
+  // - scrolling_Y_Pos      : Y position settings for scrolling text.
+  // - scrolling_Speed      : Speed ​​settings for scrolling text.
+  // - scrolling_Text       : Displayed text settings for scrolling text.
+  // - scrolling_Text_Color : Color settings for scrolling text. You can also use: display.color565(255, 0, 0);
+  run_Scrolling_Text(0, 35, "Scrolling Text. Text Size : 1, Text Color : Red, Font : Default", myRED);
+
+  display.setTextSize(2);
+  run_Scrolling_Text(0, 35, "Scrolling Text. Text Size : 2, Text Color : Green, Font : Default", myGREEN);
+
+  display.setTextSize(1);
+  display.setFont(&FreeMonoBold9pt7b);
+  run_Scrolling_Text(12, 35, "Scrolling Text. Text Size : 1, Text Color : Blue, Font : FreeMonoBold9pt7b", myBLUE);
+
+  display.setTextSize(1);
+  display.setFont();  //--> Set the font back to the default Adafruit GFX font (5x7 font).
+  run_Scrolling_Text(9, 35, "Scrolling Text. Text Size : 1, Text Color : White, Font : Default", myWHITE);
+}
+//________________________________________________________________________________ 
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+
+
+
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 04_Erase_and_Reformat_The_NVS_Memory
+#include <nvs_flash.h>
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  Serial.println();
+  delay(1000);
+
+  Serial.println("erase the NVS partition.");
+  nvs_flash_erase();  // erase the NVS partition and...
+  Serial.println("initialize the NVS partition.");
+  nvs_flash_init();   // initialize the NVS partition.
+  Serial.println("Finished.");
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  delay(10);
+}
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+
+
+
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 05_P10_RGB_32x16_Set_Scroll_Text_Web_Server_SM
+// This is how many color levels the display shows - the more the slower the update.
+//#define PxMATRIX_COLOR_DEPTH 4
+
+// Defines the speed of the SPI bus (reducing this may help if you experience noisy images).
+#define PxMATRIX_SPI_FREQUENCY 10000000
+
+// Creates a second buffer for backround drawing (doubles the required RAM).
+//#define PxMATRIX_double_buffer true
+
+//----------------------------------------Including Libraries.
+#include <PxMatrix.h>
+#include <Preferences.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include "PageIndex.h"
+//----------------------------------------
+
+//----------------------------------------Pins for LED MATRIX.
+#define P_LAT 5
+#define P_A   19
+#define P_B   23
+#define P_C   18
+#define P_OE  4
+//----------------------------------------
+
+// Defines the width and height of the panel in pixels.
+#define matrix_width  32
+#define matrix_height 16
+
+// Timer setup.
+// Create a hardware timer  of ESP32.
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// This defines the 'on' time of the display is us.
+// The larger this number, the brighter the display. If too large the ESP will crash.
+uint8_t display_draw_time = 30; // 30-70 is usually fine.
+
+// Declaring the "PxMATRIX" object as a "display" and its settings.
+PxMATRIX display(matrix_width, matrix_height, P_LAT, P_OE, P_A, P_B, P_C);
+
+//----------------------------------------Some standard colors.
+uint16_t myRED      = display.color565(255, 0, 0);
+uint16_t myGREEN    = display.color565(0, 255, 0);
+uint16_t myBLUE     = display.color565(0, 0, 255);
+uint16_t myWHITE    = display.color565(255, 255, 255);
+uint16_t myYELLOW   = display.color565(255, 255, 0);
+uint16_t myCYAN     = display.color565(0, 255, 255);
+uint16_t myMAGENTA  = display.color565(255, 0, 255);
+uint16_t myVIOLET   = display.color565(127, 0, 255);
+uint16_t myBLACK    = display.color565(0, 0, 0);
+//----------------------------------------
+
+//----------------------------------------Variable declaration for your network credentials.
+const char* ssid = "YOUR_WIFI_SSID";  //--> Your wifi name.
+const char* password = "YOUR_WIFI_PASSWORD"; //--> Your wifi password.
+//----------------------------------------
+
+//----------------------------------------Defining the key.
+// The "key" works like a password. To control the "P10 RGB 32x16", users must know the “key”.
+// You can change it to another word.
+#define key_Txt "p10rgbesp32ws"
+//----------------------------------------
+
+byte st_Brightness, st_Color_R, st_Color_G, st_Color_B, st_Size, st_Y_Position, st_Speed;
+uint16_t myCOLOR;
+char st_Text[150] = "";
+
+bool new_Settings_Come_In = false;
+bool server_Is_Started = false;
+
+// Declaring the "Preferences" object as "preferences".
+Preferences preferences;
+
+// Server on port 80.
+WebServer server(80);
+
+//________________________________________________________________________________ handleRoot()
+// This routine is executed when you open ESP32 IP Address in browser.
+void handleRoot() {
+  server.send(200, "text/html", MAIN_page); //--> Send web page.
+}
+//________________________________________________________________________________
+
+//________________________________________________________________________________ handleSettings().
+// Subroutines for handling handle settings from clients.
+void handleSettings() {
+  String incoming_Settings;
+  
+  incoming_Settings = server.arg("key");
+  
+  Serial.println();
+  Serial.println("-------------Settings");
+  Serial.print("Key : ");
+  Serial.println(incoming_Settings);
+
+  // Conditions for checking keys.
+  if (incoming_Settings == key_Txt) {
+    incoming_Settings = server.arg("sta");
+
+    // Conditions for setting.
+    if (incoming_Settings == "set") {
+      incoming_Settings = server.arg("st_Brightness");
+      st_Brightness = incoming_Settings.toInt();   
+      Serial.println();
+      Serial.println("Brightness Settings.");
+      Serial.print("Brightness : ");
+      Serial.println(st_Brightness);
+
+      incoming_Settings = server.arg("st_Color_R");
+      st_Color_R = incoming_Settings.toInt();
+      incoming_Settings = server.arg("st_Color_G");
+      st_Color_G = incoming_Settings.toInt();
+      incoming_Settings = server.arg("st_Color_B");
+      st_Color_B = incoming_Settings.toInt();
+      Serial.println();
+      Serial.println("Text Color Settings.");
+      Serial.print("RGB : ");
+      Serial.print(st_Color_R);Serial.print(",");Serial.print(st_Color_G);Serial.print(",");Serial.println(st_Color_B);
+
+      incoming_Settings = server.arg("st_Size");
+      st_Size = incoming_Settings.toInt();
+      Serial.println();
+      Serial.println("Text Size Settings.");
+      Serial.print("Text Size : ");
+      Serial.println(st_Size);
+
+      incoming_Settings = server.arg("st_Y_Position");
+      st_Y_Position = incoming_Settings.toInt();
+      Serial.println();
+      Serial.println("Y Position Setting");
+      Serial.print("Y Position : ");
+      Serial.println(st_Y_Position);
+
+      incoming_Settings = server.arg("st_Speed");
+      st_Speed = incoming_Settings.toInt();
+      Serial.println();
+      Serial.println("Scrolling Text Speed ​​Settings.");
+      Serial.print("Speed : ");
+      Serial.println(st_Speed);
+
+      incoming_Settings = server.arg("st_Text");
+      int st_Text_Length = incoming_Settings.length() + 1;
+      incoming_Settings.toCharArray(st_Text, st_Text_Length);
+      Serial.println();
+      Serial.println("Scrolled Text Settings.");
+      Serial.print("Text : ");
+      Serial.println(st_Text);
+      Serial.print("Text Length : ");
+      Serial.println(strlen(st_Text));
+
+      // Disable Timer Interrupts.
+      display_update_enable(false);
+      delay(1000);
+      
+      save_Settings_to_Flash_Memory();
+      delay(1000);
+      
+      gets_Settings_Stored_in_Flash_Memory();
+      delay(1000);
+
+      new_Settings_Come_In = true;
+      delay(100);
+
+      // Enable Timer Interrupts.
+      display_update_enable(true);
+      delay(1000);
+    }
+
+    // Sends settings stored in flash memory to the client.
+    if (incoming_Settings == "get") {
+      Serial.println();
+      Serial.println("Get Settings.");
+      
+      char send_Settings[180];
+      sprintf(send_Settings, "%d|%d|%d|%d|%d|%d|%d|%s", st_Brightness, st_Color_R, st_Color_G, st_Color_B, st_Size, st_Y_Position, st_Speed, st_Text);
+
+      Serial.print("Settings Data :");
+      Serial.println(send_Settings);
+
+      server.send(200, "text/plane", send_Settings);  //--> Sending replies to the client.
+      delay(500);
+    }
+    Serial.println("-------------");
+
+    server.send(200, "text/plane", "+OK"); //--> Sending replies to the client.
+    delay(500);
+  } else {
+    Serial.println();
+    Serial.println("Wrong Key Text !");
+    Serial.println("Please enter the correct Key Text.");
+    Serial.println("-------------");
+    
+    server.send(200, "text/plane", "+ERR"); //--> Sending replies to the client.
+    delay(500);
+  }
+}
+//________________________________________________________________________________
+
+//________________________________________________________________________________ gets_Settings_Stored_in_Flash_Memory()
+void gets_Settings_Stored_in_Flash_Memory() {
+  Serial.println();
+  Serial.println("------------Get settings stored in Flash Memory.");
+
+  // Open Preferences with my-app namespace. Each application module, library, etc
+  // has to use a namespace name to prevent key name collisions. 
+  // We will open storage in RW-mode (second parameter has to be false).
+  // Note: Namespace name is limited to 15 chars.
+  preferences.begin("mySettings", false);
+  delay(500);
+
+  st_Brightness = preferences.getInt("st_Brightness", 125);
+  st_Color_R = preferences.getInt("st_Color_R", 0);
+  st_Color_G = preferences.getInt("st_Color_G", 0);
+  st_Color_B = preferences.getInt("st_Color_B", 0);
+  st_Size = preferences.getInt("st_Size", 1);
+  st_Y_Position = preferences.getInt("st_Y_Position", 0);
+  st_Speed = preferences.getInt("st_Speed", 50);
+
+  String myText = preferences.getString("st_Text", "");
+  int myText_Length = myText.length() + 1;
+  myText.toCharArray(st_Text, myText_Length);
+  delay(500);
+
+  // Close the Preferences.
+  preferences.end();
+  delay(500);
+
+  Serial.print("Brightness : ");Serial.println(st_Brightness);
+  Serial.print("Text Color (RGB) : ");Serial.print(st_Color_R);Serial.print(",");Serial.print(st_Color_G);Serial.print(",");Serial.println(st_Color_B);
+  Serial.print("st_Size : ");Serial.println(st_Size);
+  Serial.print("st_Y_Position : ");Serial.println(st_Y_Position);
+  Serial.print("st_Speed : ");Serial.println(st_Speed);
+  Serial.print("st_Text : ");Serial.println(st_Text);
+
+  Serial.println("-------------");
+  delay(500);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ save_Settings_to_Flash_Memory()
+void save_Settings_to_Flash_Memory() {
+  Serial.println();
+  Serial.println("-------------Saves settings to flash memory.");
+  
+  // Open Preferences.
+  preferences.begin("mySettings", false);
+  delay(500);
+
+  preferences.putInt("st_Brightness", st_Brightness);
+  preferences.putInt("st_Color_R", st_Color_R);
+  preferences.putInt("st_Color_G", st_Color_G);
+  preferences.putInt("st_Color_B", st_Color_B);
+  preferences.putInt("st_Size", st_Size);
+  preferences.putInt("st_Y_Position", st_Y_Position);
+  preferences.putInt("st_Speed", st_Speed);
+  preferences.putString("st_Text", st_Text);
+
+  // Close the Preferences.
+  preferences.end();
+  delay(500);
+
+  Serial.println("Settings have been saved.");
+  Serial.println("-------------");
+  delay(500);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ connecting_To_WiFi()
+void connecting_To_WiFi() {
+  //----------------------------------------Set Wifi to STA mode.
+  Serial.println();
+  Serial.println("-------------WIFI mode");
+  Serial.println("WIFI mode : STA");
+  WiFi.mode(WIFI_STA);
+  Serial.println("-------------");
+  delay(1000);
+  //---------------------------------------- 
+
+  //----------------------------------------Connect to Wi-Fi (STA).
+  Serial.println();
+  Serial.println("-------------Connection");
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  
+  //:::::::::::::::::: The process of connecting ESP32 with WiFi Hotspot / WiFi Router.
+  // The process timeout of connecting ESP32 with WiFi Hotspot / WiFi Router is 20 seconds.
+  // If within 20 seconds the ESP32 has not been successfully connected to WiFi, the ESP32 will restart.
+  // I made this condition because on my ESP32, there are times when it seems like it can't connect to WiFi, so it needs to be restarted to be able to connect to WiFi.
+  
+  int connecting_process_timed_out = 20; //--> 20 = 20 seconds.
+  connecting_process_timed_out = connecting_process_timed_out * 2;
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+    if(connecting_process_timed_out > 0) connecting_process_timed_out--;
+    if(connecting_process_timed_out == 0) {
+      Serial.println();
+      Serial.println("Failed to connect to WiFi. The ESP32 will be restarted.");
+      Serial.println("-------------");
+      delay(1000);
+      ESP.restart();
+    }
+  }
+  
+  Serial.println();
+  Serial.println("WiFi connected");
+  Serial.print("Successfully connected to : ");
+  Serial.println(ssid);
+  Serial.println("-------------");
+  //:::::::::::::::::: 
+  delay(1000);
+  //---------------------------------------- 
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ 
+void prepare_and_start_The_Server() {
+  //----------------------------------------Setting the server.
+  server.on("/", handleRoot); 
+  server.on("/settings", handleSettings);
+  delay(500);
+  //----------------------------------------
+
+  //----------------------------------------Start server.
+  server.begin(); 
+  Serial.println();
+  Serial.println("HTTP server started");
+  delay(500);
+  //----------------------------------------
+
+  //----------------------------------------Open the IP address in your browser to open the interface page.
+  // Make sure that your computer / mobile device and ESP32 are connected to the same WiFi network.
+  Serial.println();
+  Serial.print("IP address : ");
+  Serial.println(WiFi.localIP());
+  Serial.println("Open the IP address in your browser to open the interface page.");
+  Serial.println("Make sure that your computer / mobile device and");
+  Serial.println("ESP32 are connected to the same WiFi network.");
+  delay(500);
+  //----------------------------------------
+
+  server_Is_Started = true;
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ IRAM_ATTR display_updater()
+// Interrupt handler for Timer.
+void IRAM_ATTR display_updater(){
+  // Increment the counter and set the time of ISR.
+  portENTER_CRITICAL_ISR(&timerMux);
+  display.display(display_draw_time);
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ display_update_enable()
+// Subroutine to enable and disable interrupt timers.
+void display_update_enable(bool is_enable) {
+  if (is_enable){
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &display_updater, true);
+    timerAlarmWrite(timer, 1500, true);
+    timerAlarmEnable(timer);
+  }
+  else{
+    timerDetachInterrupt(timer);
+    timerAlarmDisable(timer);
+  }
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ run_Scrolling_Text()
+// Subroutine for scrolling text.
+void run_Scrolling_Text(uint8_t scrolling_Y_Pos, unsigned long scrolling_Speed, char * scrolling_Text, uint16_t scrolling_Text_Color) {
+  uint16_t text_Length_In_Pixel;
+  int scrolling_X_Pos_CT;
+
+  if (strlen(scrolling_Text) > 0) {
+    text_Length_In_Pixel = getTextWidth(scrolling_Text);
+  } else {
+    return;
+  }
+
+  display.clearDisplay();
+
+  for (int scrolling_X_Pos = matrix_width; scrolling_X_Pos > -(matrix_width + text_Length_In_Pixel); scrolling_X_Pos--) {
+    if (new_Settings_Come_In == true) {
+      new_Settings_Come_In = false;
+      break;
+    }
+
+    if (server_Is_Started == true) {
+      // Handle client requests.
+      server.handleClient();
+    }
+    
+    scrolling_X_Pos_CT = scrolling_X_Pos + 1;
+
+    display.setTextColor(myBLACK);
+    display.setCursor(scrolling_X_Pos_CT, scrolling_Y_Pos);
+    display.print(scrolling_Text);
+    
+    display.setTextColor(scrolling_Text_Color);
+    display.setCursor(scrolling_X_Pos, scrolling_Y_Pos);
+    display.print(scrolling_Text);
+
+    delay(scrolling_Speed);
+  }
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ getTextWidth()
+uint16_t getTextWidth(const char* text) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  return w;
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID SETUP()
+void setup() {
+  // put your setup code here, to run once:
+
+  delay(2000);
+  Serial.begin(115200);
+  Serial.println();
+
+  // Get settings stored in Flash Memory.
+  gets_Settings_Stored_in_Flash_Memory();
+
+  // Display initialization.
+  display.begin(8); //--> Value 8 for 1/8 row scan panel.
+  delay(100);
+
+  // Enable Timer Interrupts.
+  display_update_enable(true);
+  delay(1000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setBrightness(125); //--> Range from 0 to 255.
+  delay(100);
+
+  display.fillScreen(myRED);
+  delay(2000);
+  display.fillScreen(myGREEN);
+  delay(2000);
+  display.fillScreen(myBLUE);
+  delay(2000);
+  display.fillScreen(myWHITE);
+  delay(2000);
+
+  display.clearDisplay();
+  delay(1000);
+
+  display.setTextWrap(false);
+  display.setTextSize(1);
+  display.setRotation(0);
+  delay(1000);
+
+  run_Scrolling_Text(4, 35, "Connecting to WiFi", myBLUE);
+  delay(1000);
+
+  run_Scrolling_Text(4, 35, "Please Wait...", myRED);
+  delay(1000);
+  
+  // Disable Timer Interrupts.
+  display_update_enable(false);
+  delay(1000);
+
+  connecting_To_WiFi();
+  delay(1000);
+
+  prepare_and_start_The_Server();
+  delay(1000);
+
+  // Enable Timer Interrupts.
+  display_update_enable(true);
+  delay(1000);
+
+  run_Scrolling_Text(4, 35, "Successfully connected to WiFi.", myGREEN);
+  delay(1000);
+
+  char IP_Add[30];
+  sprintf(IP_Add, "IP Address : %s", WiFi.localIP().toString());
+  run_Scrolling_Text(4, 35, IP_Add, myWHITE);
+  delay(1000);
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ VOID LOOP()
+void loop() {
+  // put your main code here, to run repeatedly:
+
+  // Handle client requests.
+  server.handleClient();
+
+  display.setBrightness(st_Brightness);
+  myCOLOR = display.color565(st_Color_R, st_Color_G, st_Color_B);
+  display.setTextSize(st_Size);
+  // run_Scrolling_Text(uint8_t scrolling_Y_Pos, unsigned long scrolling_Speed, char * scrolling_Text, uint16_t scrolling_Text_Color);
+  // - scrolling_Y_Pos      : Y position settings for scrolling text.
+  // - scrolling_Speed      : Speed ​​settings for scrolling text.
+  // - scrolling_Text       : Displayed text settings for scrolling text.
+  // - scrolling_Text_Color : Color settings for scrolling text. You can also use: display.color565(255, 0, 0);
+  if (strlen(st_Text) > 0) {
+    run_Scrolling_Text(st_Y_Position, st_Speed, st_Text, myCOLOR);
+  }
+}
+//________________________________________________________________________________ 
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+
+
+
+//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 06_P10_RGB_32x16_Set_Scroll_Text_Web_Server_APM
+//----------------------------------------Access Point Declaration and Configuration.
+const char* ssid = "ESP32_WS";  //--> access point name
+const char* password = "helloesp32WS"; //--> access point password
+
+IPAddress local_ip(192,168,1,1);
+IPAddress gateway(192,168,1,1);
+IPAddress subnet(255,255,255,0);
+//----------------------------------------
+
+//________________________________________________________________________________ set_ESP32_Access_Point()
+void set_ESP32_Access_Point() {
+  //----------------------------------------Set Wifi to AP mode
+  Serial.println();
+  Serial.println("-------------");
+  Serial.println("WIFI mode : AP");
+  WiFi.mode(WIFI_AP);
+  Serial.println("-------------");
+  delay(1000);
+  //---------------------------------------- 
+
+  //----------------------------------------Setting up ESP32 to be an Access Point.
+  Serial.println();
+  Serial.println("-------------");
+  Serial.println("Setting up ESP32 to be an Access Point.");
+  WiFi.softAP(ssid, password); //--> Creating Access Points
+  delay(1000);
+  Serial.println("Setting up ESP32 softAPConfig.");
+  WiFi.softAPConfig(local_ip, gateway, subnet);
+  Serial.println("-------------");
+  delay(1000);
+  //----------------------------------------
+}
+//________________________________________________________________________________ 
+
+//________________________________________________________________________________ prepare_and_start_The_Server()
+void prepare_and_start_The_Server() {
+  //----------------------------------------Setting the server.
+  server.on("/", handleRoot); 
+  server.on("/settings", handleSettings);
+  delay(500);
+  //----------------------------------------
+
+  //----------------------------------------Start server.
+  server.begin(); 
+  Serial.println();
+  Serial.println("HTTP server started");
+  delay(500);
+  //----------------------------------------
+
+  //----------------------------------------Open the IP address in your browser to open the interface page.
+  // Make sure your computer/mobile device is connected to the ESP32 Access Point.
+  Serial.println();
+  Serial.println();
+  Serial.println("------------");
+  Serial.print("SSID name : ");
+  Serial.println(ssid);
+  Serial.print("IP address : ");
+  Serial.println(WiFi.softAPIP());
+  Serial.println();
+  Serial.println("Connect your computer or mobile Wifi to the SSID above.");
+  Serial.println("Visit the IP Address above in your browser to open the main page.");
+  Serial.println("------------");
+  Serial.println();
+  delay(500);
+  //----------------------------------------
+
+  server_Is_Started = true;
+}
+//________________________________________________________________________________ 
+
+run_Scrolling_Text(4, 35, "Set up the ESP32 Access Point", myBLUE);
+delay(1000);
+
+set_ESP32_Access_Point();
+
+run_Scrolling_Text(4, 35, "Set Up the ESP32 Access Point Successfully.", myGREEN);
+delay(1000);
+
+char IP_Add[30];
+sprintf(IP_Add, "IP Address : %s", WiFi.softAPIP().toString());
+run_Scrolling_Text(4, 35, IP_Add, myWHITE);
+delay(1000);
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
