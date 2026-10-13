@@ -32,7 +32,9 @@ export default function HomeScreen({ onAdd, onOpen }) {
           <Pressable onPress={() => onOpen(item)} style={[styles.card, styles.row]}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.text, { fontWeight: '600' }]}>{item.name}</Text>
-              <Text style={styles.small}>{item.mac}</Text>
+              <Text style={styles.small}>
+                {item.transport === 'wifi' ? `Wi-Fi · ${item.host}` : `Bluetooth · ${item.mac}`}
+              </Text>
             </View>
             <View style={signStyle}>
               <Text style={{ color: '#000', fontSize: 20, fontWeight: '800' }}>

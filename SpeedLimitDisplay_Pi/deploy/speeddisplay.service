@@ -1,0 +1,18 @@
+[Unit]
+Description=Speed limit display (3 x P10 RGB panels, Wi-Fi API on port 8099)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# root: direct GPIO access for the panels
+User=root
+WorkingDirectory=/opt/speeddisplay
+Environment=PYTHONPATH=/opt/speeddisplay
+ExecStart=/opt/speeddisplay/venv/bin/python -m speeddisplay -c /etc/speeddisplay/config.ini run
+Restart=always
+RestartSec=3
+# Slight priority boost so other services do not cause flicker.
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

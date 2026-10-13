@@ -3,6 +3,7 @@ import { FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native'
 import { DisplaySession, ensureBlePermissions, ensureBluetoothOn, startScan } from '../ble';
 import { isValidKey, normalizeKey } from '../protocol';
 import { listDisplays, saveDisplay } from '../storage';
+import { WifiSession } from '../wifi';
 import { Button, colors, styles } from '../ui';
 
 const SCAN_MS = 15000;
@@ -15,6 +16,8 @@ export default function ScanScreen({ onBack, onAdded }) {
   const [selected, setSelected] = useState(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
+  const [wifiOpen, setWifiOpen] = useState(false);
+  const [host, setHost] = useState('');
   const stopRef = useRef(null);
 
   const stop = () => {
@@ -77,6 +80,40 @@ export default function ScanScreen({ onBack, onAdded }) {
     }
   };
 
+  // Wi-Fi display (Raspberry Pi): address + device key, no scan needed.
+  const connectWifi = async () => {
+    if (!host.trim()) {
+      setError('Enter the IP address or name of the display');
+      return;
+    }
+    if (!isValidKey(key)) {
+      setError('Device key must be 8-32 letters/numbers');
+      return;
+    }
+    stop();
+    setBusy(true);
+    setError('');
+    try {
+      const session = await WifiSession.open(host, key);
+      const record = {
+        transport: 'wifi',
+        host: host.trim(),
+        mac: session.info.mac,
+        id: `wifi:${session.info.mac}`,
+        name: session.state?.name || session.info.name,
+        key: normalizeKey(key),
+        lastLimit: session.state?.limit,
+      };
+      await saveDisplay(record);
+      setWifiOpen(false);
+      onAdded(record, session);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const devices = Object.values(found).sort((a, b) => a.name.localeCompare(b.name));
 
   return (
@@ -88,7 +125,7 @@ export default function ScanScreen({ onBack, onAdded }) {
         <Text style={styles.title}>Add display</Text>
       </View>
 
-      {!!error && !selected && <Text style={styles.error}>{error}</Text>}
+      {!!error && !selected && !wifiOpen && <Text style={styles.error}>{error}</Text>}
 
       <FlatList
         data={devices}
@@ -124,6 +161,54 @@ export default function ScanScreen({ onBack, onAdded }) {
         disabled={scanning}
         onPress={scan}
       />
+      <Button
+        title="+ Wi-Fi display (Raspberry Pi)"
+        kind="secondary"
+        style={{ marginTop: 8 }}
+        onPress={() => {
+          setError('');
+          setKey('');
+          setWifiOpen(true);
+        }}
+      />
+
+      <Modal visible={wifiOpen} transparent animationType="fade" onRequestClose={() => setWifiOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', padding: 24 }}>
+          <View style={styles.card}>
+            <Text style={[styles.text, { fontWeight: '700', marginBottom: 4 }]}>Wi-Fi display</Text>
+            <Text style={[styles.small, { marginBottom: 12 }]}>
+              IP address or name of the Raspberry Pi (same Wi-Fi, or its Tailscale IP), and the device key
+              shown on the panel at first start.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={host}
+              onChangeText={setHost}
+              placeholder="e.g. 192.168.1.94"
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <TextInput
+              style={[styles.input, { marginTop: 8 }]}
+              value={key}
+              onChangeText={(t) => setKey(t.toUpperCase())}
+              placeholder="device key, e.g. K7P3MX9Q"
+              placeholderTextColor={colors.muted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              secureTextEntry
+              maxLength={32}
+            />
+            {!!error && <Text style={styles.error}>{error}</Text>}
+            <View style={[styles.row, { marginTop: 12 }]}>
+              <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setWifiOpen(false)} />
+              <Button title="Connect" style={{ flex: 1 }} busy={busy} onPress={connectWifi} />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={!!selected} transparent animationType="fade" onRequestClose={() => setSelected(null)}>
         <View style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'center', padding: 24 }}>

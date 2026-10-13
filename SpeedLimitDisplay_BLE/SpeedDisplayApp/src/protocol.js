@@ -55,6 +55,10 @@ export function parseState(payload) {
     digitColor: Number(s.dcol),
     textColor: Number(s.tcol),
     name: s.name,
+    // Raspberry Pi (Wi-Fi) displays only: 'speed' | 'video', videos on the USB stick, video playing now
+    mode: s.mode,
+    videos: s.vid === undefined ? undefined : Number(s.vid),
+    playing: s.play === '1',
   };
 }
 

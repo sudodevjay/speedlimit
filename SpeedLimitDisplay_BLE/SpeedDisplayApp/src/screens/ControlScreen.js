@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { DisplaySession } from '../ble';
+import { isWifi, openSession } from '../session';
 import { COLOR_PRESETS, MAX_LIMIT, QUICK_LIMITS } from '../config';
 import { isValidKey, normalizeKey } from '../protocol';
 import { removeDisplay, updateDisplay } from '../storage';
@@ -29,7 +29,7 @@ export default function ControlScreen({ display, initialSession, onBack }) {
     const cur = sessionRef.current;
     if (cur && cur.connected) return cur;
     setStatus('connecting');
-    const s = await DisplaySession.open(record.id, record.key, record.mac);
+    const s = await openSession(record);
     attach(s);
     return s;
   };
@@ -88,7 +88,7 @@ export default function ControlScreen({ display, initialSession, onBack }) {
         await updateDisplay(record.mac, { name: newName });
         setRecord((r) => ({ ...r, name: newName }));
         setNewName('');
-        Alert.alert('Renamed', 'The display is restarting with the new name.');
+        Alert.alert('Renamed', isWifi(record) ? 'Name saved.' : 'The display is restarting with the new name.');
       }
     );
   };
@@ -151,7 +151,7 @@ export default function ControlScreen({ display, initialSession, onBack }) {
       <View style={[styles.row, { marginBottom: 12 }]}>
         <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: statusColor }} />
         <Text style={styles.small}>
-          {status} · {record.mac}
+          {status} · {isWifi(record) ? `Wi-Fi ${record.host}` : record.mac}
         </Text>
         <View style={{ flex: 1 }} />
         {status !== 'connected' && (
@@ -160,6 +160,33 @@ export default function ControlScreen({ display, initialSession, onBack }) {
       </View>
 
       {!!error && <Text style={styles.error}>{error}</Text>}
+
+      {/* Display mode (Raspberry Pi only): speed limit or videos from the USB stick */}
+      {state?.mode !== undefined && (
+        <View style={styles.card}>
+          <Text style={styles.label}>Display shows</Text>
+          <View style={styles.row}>
+            {[
+              ['speed', 'Speed limit'],
+              ['video', 'Video (USB)'],
+            ].map(([m, title]) => (
+              <Button
+                key={m}
+                title={title}
+                kind={state.mode === m ? 'primary' : 'secondary'}
+                style={{ flex: 1 }}
+                disabled={busy}
+                onPress={() => run((s) => s.setMode(m))}
+              />
+            ))}
+          </View>
+          <Text style={[styles.small, { marginTop: 8 }]}>
+            {state.videos ? `${state.videos} video(s) on the USB stick` : 'No videos found on the USB stick'}
+            {state.mode === 'video' && (state.playing ? ' · playing now' : ' · showing the speed limit instead')}
+          </Text>
+          <Button title="Refresh" kind="secondary" style={{ marginTop: 8 }} busy={busy} onPress={() => run((s) => s.send('GET'))} />
+        </View>
+      )}
 
       {/* Speed limit */}
       <View style={styles.card}>
@@ -248,7 +275,9 @@ export default function ControlScreen({ display, initialSession, onBack }) {
 
       {/* Settings */}
       <View style={styles.card}>
-        <Text style={styles.label}>Rename display (BLE name, display restarts)</Text>
+        <Text style={styles.label}>
+          {isWifi(record) ? 'Rename display' : 'Rename display (BLE name, display restarts)'}
+        </Text>
         <View style={styles.row}>
           <TextInput
             style={[styles.input, { flex: 1 }]}
